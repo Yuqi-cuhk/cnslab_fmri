@@ -19,9 +19,8 @@ TS = 64  # number of voters per test subject
 LR = 0.001  # learning rate
 batch_size = 64
 
-
 criterion = nn.BCELoss()  # CrossEntropyLoss()
-#optimizer = optim.Adam(net.parameters(), lr=LR, weight_decay=0.001)
+# optimizer = optim.Adam(net.parameters(), lr=LR, weight_decay=0.001)
 
 # state_dict = torch.load('checkpoint.pth')
 # net.load_state_dict(state_dict)
@@ -30,19 +29,24 @@ train_data = np.load('data/train_data_1200_1.npy')
 train_label = np.load('data/train_label_1200_1.npy')
 test_data = np.load('data/test_data_1200_1.npy')
 test_label = np.load('data/test_label_1200_1.npy')
+### ----- when L = 1000 (refer to: preprocessing.py), the shape of train/test data is:
+# train_data.shape: (873, 1, 1000, 22, 1)
+# train_label.shape: (873,)
+# test_data.shape: (218, 1, 1000, 22, 1)
+# test_label.shape: (218,)
 
 print(train_data.shape)
 
 ###### start training model
 training_loss = 0.0
 
-for window_size in [128]:#[50, 64, 75, 100, 128, 256, 1200]:
+for window_size in [128]:  #[50, 64, 75, 100, 128, 256, 1200]:
     W = window_size
     final_testing_accuracy = 0
     testing_acc_curr_fold = []
-    #print('-'*80)
-    #print("Window Size {}".format(W))
-    #print('-'*80)
+    # print('-'*80)
+    # print("Window Size {}".format(W))
+    # print('-'*80)
     for fold in range(1, 6):
         print('-'*80)
         print("Window Size {}, Fold {}".format(W, fold))
@@ -55,32 +59,33 @@ for window_size in [128]:#[50, 64, 75, 100, 128, 256, 1200]:
         test_data = np.load('data/test_data_1200_'+str(fold)+'.npy')
         test_label = np.load('data/test_label_1200_'+str(fold)+'.npy')
         
-        net = Model(1, 1, None, True)
+        net = Model(1, 1, None, True)  # def __init__(self, in_channels, num_class, graph_args, edge_importance_weighting, **kwargs):
         net.to(device)
         
         optimizer = optim.Adam(net.parameters(), lr=LR, weight_decay=0.001)
 
         for epoch in range(60001):  # number of mini-batches
             # select a random sub-set of subjects
-            idx_batch = np.random.permutation(int(train_data.shape[0]))
-            idx_batch = idx_batch[:int(batch_size)]
+            idx_batch = np.random.permutation(int(train_data.shape[0]))  # idx_batch.shape = 873
+            idx_batch = idx_batch[:int(batch_size)]  # idx_batch.shape = 64 (i.e., batch_size)
 
             # construct a mini-batch by sampling a window W for each subject
-            train_data_batch = np.zeros((batch_size, 1, W, 22, 1))
-            train_label_batch = train_label[idx_batch]
+            train_data_batch = np.zeros((batch_size, 1, W, 22, 1))  # train_data_batch.shape: (64, 1, W, 22, 1)
+            train_label_batch = train_label[idx_batch]  # train_label_batch.shape: (64,)
 
             for i in range(batch_size):
                 r1 = random.randint(0, train_data.shape[2] - W)
-                train_data_batch[i] = train_data[idx_batch[i], :, r1:r1 + W, :, :]
+                train_data_batch[i] = train_data[idx_batch[i], :, r1:r1 + W, :, :]  # train_data_batch.shape: (64, 1, W, 22, 1)
 
             train_data_batch_dev = torch.from_numpy(train_data_batch).float().to(device)
             train_label_batch_dev = torch.from_numpy(train_label_batch).float().to(device)
-            #train_data_batch_dev = train_data_batch_dev.squeeze()
+            # train_data_batch_dev = train_data_batch_dev.squeeze()
+            
             # forward + backward + optimize
             optimizer.zero_grad()
-            #net.hidden = net.init_hidden(batch_size)
-            outputs = net(train_data_batch_dev)
-            loss = criterion(outputs, train_label_batch_dev)
+            # net.hidden = net.init_hidden(batch_size)
+            outputs = net(train_data_batch_dev)  # train_data_batch_dev.shape: torch.Size([64, 1, W, 22, 1])
+            loss = criterion(outputs, train_label_batch_dev)  # train_label_batch_dev.shape: torch.Size([64])
             loss.backward()
             optimizer.step()
 
@@ -88,29 +93,30 @@ for window_size in [128]:#[50, 64, 75, 100, 128, 256, 1200]:
             training_loss += loss.item()
             if epoch % 1000 == 0:  # print every T mini-batches
                 # print(outputs)
-                outputs = outputs.data.cpu().numpy() > 0.5
+                outputs = outputs.data.cpu().numpy() > 0.5  # if yes, outputs: True, else: False
                 train_acc = sum(outputs[:, 0] == train_label_batch) / train_label_batch.shape[0]
                 print('[%d] training loss: %.3f training batch acc %f' % (epoch + 1, training_loss/1000, train_acc))
                 training_loss = 0.0
 
             # validate on test subjects by voting
             if epoch % 1000 == 0:  # print every K mini-batches
-                idx_batch = np.random.permutation(int(test_data.shape[0]))
+                idx_batch = np.random.permutation(int(test_data.shape[0]))  # test_data.shape: (218, 1, 1000, 22, 1)
                 idx_batch = idx_batch[:int(batch_size)]
 
-                test_label_batch = test_label[idx_batch]
-                prediction = np.zeros((test_data.shape[0],))
-                voter = np.zeros((test_data.shape[0],))
-                for v in range(TS):
-                    idx = np.random.permutation(int(test_data.shape[0]))
+                test_label_batch = test_label[idx_batch]  # test_label.shape: (218,); test_label_batch.shape: (64,)
+                prediction = np.zeros((test_data.shape[0],))  # prediction.shape: (218,)
+                voter = np.zeros((test_data.shape[0],))  # voter.shape: (218,)
+                
+                for v in range(TS):  # TS: number of voters per test subject
+                    idx = np.random.permutation(int(test_data.shape[0]))  # idx.shape: (218,)
 
                     # testing also performed batch by batch (otherwise it produces error)
-                    for k in range(int(test_data.shape[0] / batch_size)):
+                    for k in range(int(test_data.shape[0] / batch_size)):  # int(218/64) = 3
                         idx_batch = idx[int(batch_size * k):int(batch_size * (k + 1))]
 
                         # construct random sub-sequences from a batch of test subjects
-                        test_data_batch = np.zeros((batch_size, 1, W, 22, 1))
-                        for i in range(64):
+                        test_data_batch = np.zeros((batch_size, 1, W, 22, 1))  # test_data_batch.shape: (64, 1, W, 22, 1)
+                        for i in range(64):  # 64: batch size
                             r1 = random.randint(0, test_data.shape[2] - W)
                             test_data_batch[i] = test_data[idx_batch[i], :, r1:r1 + W, :, :]
 
