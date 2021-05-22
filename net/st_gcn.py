@@ -23,20 +23,18 @@ class Model(nn.Module):
     Shape:
         - Input: :math:`(N, in_channels, T_{in}, V_{in}, M_{in})`
         - Output: :math:`(N, num_class)` where
-            :math:`N` is a batch size,
+            :math:`N` is batch size,
             :math:`T_{in}` is a length of input sequence,
             :math:`V_{in}` is the number of graph nodes,
             :math:`M_{in}` is the number of instance in a frame.
     """
 
-    def __init__(self, in_channels, num_class, graph_args,
-                 edge_importance_weighting, **kwargs):
+    def __init__(self, in_channels, num_class, graph_args, edge_importance_weighting, **kwargs):
         super().__init__()
 
         # load graph
-
         # **this is the adj matrix Soham produced that computes correlation based on raw data **
-        #A = np.load('../cs230/adj/adj_matrix.npy')
+        # A = np.load('../cs230/adj/adj_matrix.npy')
 
         # **this is the adj matrix that computes correlation based on z-score of data for all 1200 timesteps**
         A = np.load('data/adj_matrix_qingyu.npy')
@@ -46,17 +44,17 @@ class Model(nn.Module):
         for i in range(num_node):
             if Dl[i] > 0:
                 Dn[i, i] = Dl[i] ** (-0.5)
-        DAD = np.dot(np.dot(Dn, A), Dn)
+        DAD = np.dot(np.dot(Dn, A), Dn)  # DAD.shape: (22, 22)
 
         temp_matrix = np.zeros((1, A.shape[0], A.shape[0]))
         temp_matrix[0] = DAD
         A = torch.tensor(temp_matrix, dtype=torch.float32, requires_grad=False)
-        self.register_buffer('A', A)
+        self.register_buffer('A', A)  # A.shape: torch.Size([1, 22, 22])
 
         # build networks (**number of layers, final output features, kernel size**)
-        spatial_kernel_size = A.size(0)
-        temporal_kernel_size = 11 # update temporal kernel size
-        kernel_size = (temporal_kernel_size, spatial_kernel_size)
+        spatial_kernel_size = A.size(0)  # spatial_kernel_size = 1
+        temporal_kernel_size = 11  # update temporal kernel size
+        kernel_size = (temporal_kernel_size, spatial_kernel_size)  # kernel_size = (11, 1)
         self.data_bn = nn.BatchNorm1d(in_channels * A.size(1))
         kwargs0 = {k: v for k, v in kwargs.items() if k != 'dropout'}
         self.st_gcn_networks = nn.ModuleList((
@@ -86,24 +84,24 @@ class Model(nn.Module):
         self.fcn = nn.Conv2d(64, num_class, kernel_size=1)
         self.sig = nn.Sigmoid()
 
-    def forward(self, x):
+    def forward(self, x):  # x.shape: torch.Size([64, 1, W, 22, 1]), where 64 is batch size
 
         # data normalization
-        N, C, T, V, M = x.size()
-        x = x.permute(0, 4, 3, 1, 2).contiguous()
-        x = x.view(N * M, V * C, T)
-        x = self.data_bn(x)
-        x = x.view(N, M, V, C, T)
-        x = x.permute(0, 1, 3, 4, 2).contiguous()
-        x = x.view(N * M, C, T, V)
+        N, C, T, V, M = x.size()  # N=64, C=1, W=W(e.g., 128), V=22, M=1 
+        x = x.permute(0, 4, 3, 1, 2).contiguous()  # torch.Size([64, 1, 22, 1, W])
+        x = x.view(N * M, V * C, T)  # torch.Size([64*1, 22*1, W])
+        x = self.data_bn(x)  # torch.Size([64*1, 22*1, W])
+        x = x.view(N, M, V, C, T)  # torch.Size([64, 1, 22, 1, W])
+        x = x.permute(0, 1, 3, 4, 2).contiguous()  # torch.Size([64, 1, 1, W, 22])
+        x = x.view(N * M, C, T, V)  # torch.Size(1*64, 1, W, 22])
 
-        # forwad
+        # forward
         # for gcn, importance in zip(self.st_gcn_networks, self.edge_importance):
         #     x, _ = gcn(x, self.A * (importance + torch.transpose(importance,1,2)))
-        #print(self.edge_importance.shape)
+        # print(self.edge_importance.shape)
         for gcn in self.st_gcn_networks:
-            x, _ = gcn(x, self.A * (self.edge_importance*self.edge_importance+torch.transpose(self.edge_importance*self.edge_importance,1,2)))
-
+            x, _ = gcn(x, self.A * (self.edge_importance*self.edge_importance + torch.transpose(self.edge_importance*self.edge_importance,1,2)))  # after ",", size is [1, 22, 22]
+            
         # global pooling
         x = F.avg_pool2d(x, x.size()[2:])
         x = x.view(N, M, -1, 1, 1).mean(dim=1)
@@ -112,9 +110,8 @@ class Model(nn.Module):
         # pdb.set_trace()
         x = self.fcn(x)
         x = self.sig(x)
-
         x = x.view(x.size(0), -1)
-
+        
         return x
 
     def extract_feature(self, x):
@@ -128,7 +125,7 @@ class Model(nn.Module):
         x = x.permute(0, 1, 3, 4, 2).contiguous()
         x = x.view(N * M, C, T, V)
 
-        # forwad
+        # forward
         for gcn, importance in zip(self.st_gcn_networks, self.edge_importance):
             x, _ = gcn(x, self.A * importance)
 
@@ -141,6 +138,7 @@ class Model(nn.Module):
         # pdb.set_trace()
         return output, feature
 
+    
 class st_gcn(nn.Module):
     r"""Applies a spatial temporal graph convolution over an input graph sequence.
 
@@ -159,7 +157,7 @@ class st_gcn(nn.Module):
         - Output[1]: Graph adjacency matrix for output data in :math:`(K, V, V)` format
 
         where
-            :math:`N` is a batch size,
+            :math:`N` is batch size,
             :math:`K` is the spatial kernel size, as :math:`K == kernel_size[1]`,
             :math:`T_{in}/T_{out}` is a length of input/output sequence,
             :math:`V` is the number of graph nodes.
@@ -177,7 +175,7 @@ class st_gcn(nn.Module):
         print("Dropout={}".format(dropout))
         assert len(kernel_size) == 2
         assert kernel_size[0] % 2 == 1
-        padding = ((kernel_size[0] - 1) // 2, 0)
+        padding = ((kernel_size[0] - 1) // 2, 0)  # padding = (5, 0)
 
         self.gcn = ConvTemporalGraphical(in_channels, out_channels,
                                          kernel_size[1])
